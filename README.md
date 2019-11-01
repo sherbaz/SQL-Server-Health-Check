@@ -6,5 +6,5 @@ My initial script had workflows to define, sql logins, authentication, windows/S
 Add all SQL instance names into a serverlist.txt file and run the script from the same folder.
 
 References:
-1. Pinal Dev's Blog
+1. Pinal Dave's Blog
 2. MSDN
