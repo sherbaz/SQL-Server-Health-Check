@@ -12,7 +12,7 @@ $htmlBody += "<div style=""background:#666; padding:1px;""><div style=""backgrou
 $htmlBody += "
         <b>Root Blockers(if any)</b>
         <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
-                <tr style=""background:#ac33ff; color:#FFF; border:1px solid black;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
                     <th>ServerName</th><th>EventTime</th><th>loginame</th><th>spid</th>
                     <th>blocked</th><th>lastwaittype</th><th>login_time</th>
                     <th>last_batch</th><th>Status</th><th>hostname</th>
@@ -43,7 +43,7 @@ $htmlBody += "</table><br />"
 $htmlBody += "
         <b>Blocking Tree</b>
         <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
-                <tr style=""background:#ac33ff; color:#FFF; border:1px solid black;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
                     <th>ServerName</th><th>EventTime</th><th>BLOCKING_TREE</th>
                     </tr>"
 
@@ -85,11 +85,41 @@ foreach($instance in Get-Content serverlist.txt) {
 
 $htmlBody += "</table><br />"
 
+#=== Memory Utilization
+$htmlBody += "
+        <b>Memory Usage</b>
+        <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
+                    <th>Servername</th><th>SQLServerStartTime</th><th>SQLCurrentMemoryUsage(MB)</th>
+                    <th>SQLMaxMemoryTarget(MB)</th><th>OSTotalMemory(MB)</th><th>OSAvailableMemory(MB)</th></tr>"
+$results = $null
+foreach($instance in Get-Content serverlist.txt) {
+    $results += Invoke-Sqlcmd -Query "
+        SELECT 
+            sqlserver_start_time AS [SQLServerStartTime],
+            (committed_kb / 1024) AS [SQLCurrentMemoryUsage],
+            (committed_target_kb / 1024) AS [SQLMaxMemoryTarget],
+            (total_physical_memory_kb / 1024) AS [OSTotalMemory],
+            (available_physical_memory_kb / 1024) AS [OSAvailableMemory]
+        FROM 
+            sys.dm_os_sys_info
+        CROSS JOIN 
+            sys.dm_os_sys_memory;" -ServerInstance $instance
+
+    foreach($record in $results)
+    {
+        $htmlBody += "<tr><td>"+$instance+"</td><td>"+$record.SQLServerStartTime+"</td><td>"+$record.SQLCurrentMemoryUsage+"</td>
+                        <td>"+$record.SQLMaxMemoryTarget+"</td><td>"+$record.OSTotalMemory+"</td><td>"+$record.OSAvailableMemory+"</td></tr>"
+    }
+}
+
+$htmlBody += "</table><br />"
+
 #=== CPU Utilization
 $htmlBody += "
         <b>CPU Usage</b>
         <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
-                <tr style=""background:#ac33ff; color:#FFF; border:1px solid black;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
                     <th>Servername</th><th>SQLServer_CPU</th><th>System_Idle_Process</th>
                     <th>Other_Process_CPU</th><th>EventTime</th></tr>"
 $results = $null
@@ -97,7 +127,7 @@ foreach($instance in Get-Content serverlist.txt) {
     $results += Invoke-Sqlcmd -Query "
         DECLARE @ts BIGINT;
         DECLARE @lastNmin TINYINT;
-        SET @lastNmin = 10;
+        SET @lastNmin = 200;
         SELECT @ts =(SELECT cpu_ticks/(cpu_ticks/ms_ticks) FROM sys.dm_os_sys_info); 
         SELECT TOP(@lastNmin)
                 @@servername as ServerName,
@@ -112,7 +142,7 @@ foreach($instance in Get-Content serverlist.txt) {
         FROM (SELECT[timestamp], convert(xml, record) AS [record]             
         FROM sys.dm_os_ring_buffers             
         WHERE ring_buffer_type =N'RING_BUFFER_SCHEDULER_MONITOR'AND record LIKE'%%')AS x )AS y
-        where SystemIdle < 80
+        where SystemIdle < 50
         ORDER BY record_id DESC;" -ServerInstance $instance
 
     foreach($record in $results)
@@ -124,11 +154,53 @@ foreach($instance in Get-Content serverlist.txt) {
 
 $htmlBody += "</table><br />"
 
+#=== Backup Status
+$htmlBody += "
+        <b>Backup Status</b>
+        <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
+                    <th>Servername</th><th>Database</th><th>LastFullBackup</th>
+                    <th>LastLogBackup</th></tr>"
+$results = $null
+foreach($instance in Get-Content serverlist.txt) {
+    $results += Invoke-Sqlcmd -Query "
+        WITH LastFullBackup AS (
+            SELECT database_name, 
+                   MAX(backup_finish_date) AS LastFullBackupDate
+            FROM msdb.dbo.backupset
+            WHERE type = 'D'
+            GROUP BY database_name
+        ),
+        LastLogBackup AS (
+            SELECT database_name, 
+                   MAX(backup_finish_date) AS LastLogBackupDate
+            FROM msdb.dbo.backupset
+            WHERE type = 'L'
+            GROUP BY database_name
+        )
+        SELECT @@servername as ServerName, d.name AS DatabaseName, 
+               ISNULL(CONVERT(VARCHAR, f.LastFullBackupDate, 120), 'NEVER') AS LastFullBackup,
+               ISNULL(CONVERT(VARCHAR, l.LastLogBackupDate, 120), 'NEVER') AS LastLogBackup
+        FROM sys.databases d
+        LEFT JOIN LastFullBackup f ON d.name = f.database_name
+        LEFT JOIN LastLogBackup l ON d.name = l.database_name
+        ORDER BY d.name;
+" -ServerInstance $instance
+
+    foreach($record in $results)
+    {
+        $htmlBody += "<tr><td>"+$instance+"</td><td>"+$record.DatabaseName+"</td><td>"+$record.LastFullBackup+"</td>
+                        <td>"+$record.LastLogBackup+"</td></tr>"
+    }
+}
+
+$htmlBody += "</table><br />"
+
 #=== Drive Space
 $htmlBody += "
         <b>Drive Space &lt; 30%</b>
         <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
-                <tr style=""background:#ac33ff; color:#FFF; border:1px solid black;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
                     <th>Servername</th><th>Drive</th><th>FreeSpaceInGB</th>
                     <th>TotalSpaceInGB</th><th>FreeSpaceInPct</th><th>EventTime</th></tr>"
 $results = $null
@@ -149,6 +221,111 @@ foreach($instance in Get-Content serverlist.txt) {
     {
         $htmlBody += "<tr><td>"+$instance+"</td><td>"+$record.Drive+"</td><td>"+$record.FreeSpaceInGB+"</td>
            <td>"+$record.TotalSpaceInGB+"</td><td>"+$record.FreeSpaceInPct+"</td><td>"+$record.EventTime+"</td></tr>"
+    }
+}
+
+$htmlBody += "</table><br />"
+
+#=== SQL Server Agent Job Status
+$htmlBody += "
+        <b>SQL Server Agent Job Status</b>
+        <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
+                    <th>Servername</th><th>JobName</th><th>TimeRun</th>
+                    <th>JobStatus</th><th>JobOutcome</th></tr>"
+$results = $null
+foreach($instance in Get-Content serverlist.txt) {
+    $results += Invoke-Sqlcmd -Query "
+                    USE MSDB
+                    GO
+
+                    WITH CTE_MostRecentJobRun AS (
+                        SELECT 
+                            job_id,
+                            run_status,
+                            run_date,
+                            run_time,
+                            ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY run_date DESC, run_time DESC) AS rn
+                        FROM sysjobhistory
+                        WHERE step_id = 0
+                    )
+                    SELECT 
+                        j.name AS [JobName],
+                        CASE 
+                            WHEN j.enabled = 1 THEN 'Enabled' 
+                            ELSE 'Disabled' 
+                        END AS [JobStatus],
+                        CASE 
+                            WHEN mr.run_status = 0 THEN 'Failed'
+                            WHEN mr.run_status = 1 THEN 'Succeeded'
+                            WHEN mr.run_status = 2 THEN 'Retry'
+                            WHEN mr.run_status = 3 THEN 'Cancelled'
+                            ELSE 'Unknown'
+                        END AS [JobOutcome],
+                        CONVERT(VARCHAR, DATEADD(S, (mr.run_time/10000)*60*60 + ((mr.run_time - (mr.run_time/10000) * 10000)/100) * 60 + (mr.run_time - (mr.run_time/100) * 100), CONVERT(DATETIME, RTRIM(mr.run_date), 113)), 100) AS [LastRunTime]
+                    FROM sysjobs j
+                    JOIN CTE_MostRecentJobRun mr ON j.job_id = mr.job_id
+                    WHERE mr.rn = 1
+                    ORDER BY j.name;
+
+            " -ServerInstance $instance
+
+    foreach($record in $results)
+    {
+        $htmlBody += "<tr><td>"+$instance+"</td><td>"+$record.JobName+"</td><td>"+$record.TimeRun+"</td>
+           <td>"+$record.JobStatus+"</td><td>"+$record.JobOutcome+"</td></tr>"
+    }
+}
+
+$htmlBody += "</table><br />"
+
+
+#=== Error logs
+$htmlBody += "
+        <b>Errorlog</b>
+        <table style=""border:1px dotted black; font-size:small; background: #EEE;"">
+                <tr style=""background:#000080; color:#FFF; border:1px solid black;"">
+                    <th>Servername</th><th>LogDate</th><th>Text</th>
+                    </tr>"
+$results = $null
+foreach($instance in Get-Content serverlist.txt) {
+    $results += Invoke-Sqlcmd -Query "
+                    /* 
+                    script name: ErrorLogs.sql 
+                    Runs xp_readerrorlog to query the errorlog for entries for the past x amount of days. 
+                    */ 
+  
+                    SET NOCOUNT ON 
+  
+                    -- cleanup temp tables in case they were left behind 
+                    IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE table_name = '#servername') DROP TABLE #servername 
+                    IF EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE table_name = '#xp_readerrorlog') DROP TABLE #xp_readerrorlog 
+  
+                    -- declare and set variables 
+                    DECLARE @NumOfLogDays INT 
+                    DECLARE @startdate DATETIME 
+                    DECLARE @enddate DATETIME 
+  
+                    IF (SELECT DATENAME(WEEKDAY, GETDATE())) like 'Monday' SET @NumOfLogDays = 3 ELSE SET @NumOfLogDays = 1 -- if it's Monday get 3 days of jobs 
+                    SET @startdate=GETDATE() - @NumOfLogDays 
+                    SET @enddate=GETDATE() 
+  
+                    -- create and populate temp tables 
+                    CREATE TABLE #servername (ServerName VARCHAR(100)) 
+                    INSERT INTO #servername 
+                    SELECT @@servername 
+  
+                    CREATE TABLE #xp_readerrorlog(LogDate varchar(30),ProcessInfo varchar(30),Text varchar(max)) 
+                    INSERT INTO #xp_readerrorlog 
+                    EXEC xp_readerrorlog 0,1,NULL,NULL,@startdate,@enddate,'asc' 
+  
+                    -- join temp tables 
+                    SELECT a.ServerName, b.LogDate, b.Text as 'Text' 
+                    FROM #servername a, #xp_readerrorlog b;" -ServerInstance $instance
+
+    foreach($record in $results)
+    {
+        $htmlBody += "<tr><td>"+$instance+"</td><td>"+$record.LogDate+"</td><td>"+$record.Text+"</td></tr>"
     }
 }
 
